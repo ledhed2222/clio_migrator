@@ -187,14 +187,9 @@ main(int argc, char* argv[])
       return EXIT_FAILURE;
   }
 
-  auto const threads = config.valueOr("io_threads", 2);
-  if (threads <= 0)
-  {
-    std::cerr << "io_threads not valid" << std::endl;
-    return EXIT_FAILURE;
-  }
+  boost::asio::io_context ioc;
+  auto work = boost::asio::make_work_guard(ioc);
 
-  boost::asio::io_context ioc{threads};
   auto backend = Backend::make_Backend(ioc, config);
 
   boost::asio::spawn(
@@ -204,7 +199,7 @@ main(int argc, char* argv[])
             std::cout << "Completed migration" << std::endl;
         });
 
-  ioc.run_one();
+  ioc.run();
   std::cout << "Success!" << std::endl;
   return EXIT_SUCCESS;
 }
