@@ -5,9 +5,7 @@
 #include <etl/NFTHelpers.h>
 
 #include <boost/asio.hpp>
-#include <boost/json.hpp>
 #include <cassandra.h>
-#include <ripple/basics/base_uint.h>
 
 #include <iostream>
 
@@ -16,14 +14,17 @@ doMigration(
     Backend::CassandraBackend& backend,
     boost::asio::yield_context yield)
 {
-    // TODO double check i am freeing memory correctly before throwing errors
+    std::cout << "Beginning migration" << std::endl;
     /*
      * Step 0 - If we haven't downloaded the initial ledger yet, just short
      * circuit.
      */
     auto const ledgerRange = backend.hardFetchLedgerRangeNoThrow(yield);
     if (!ledgerRange)
+    {
+        std::cout << "There is no data to migrate" << std::endl;
         return;
+    }
 
     /*
      * Step 1 - Look at all NFT transactions, recording in
@@ -90,6 +91,9 @@ doMigration(
                    << ripple::to_string(txHash);
                 throw std::runtime_error(ss.str());
             }
+            if (tx->ledgerSequence > ledgerRange->maxSequence)
+                continue;
+
             ripple::STTx const sttx{ripple::SerialIter{
                 tx->transaction.data(), tx->transaction.size()}};
             if (sttx.getTxnType() != ripple::TxType::ttNFTOKEN_MINT)
@@ -161,6 +165,12 @@ doMigration(
               "migration receipt if necessary";
         throw std::runtime_error(ss.str());
     }
+
+    std::cout << "Completed migration from "
+        << ledgerRange->minSequence
+        << " to "
+        << ledgerRange->maxSequence
+        << std::endl;
 }
 
 int
@@ -188,15 +198,14 @@ main(int argc, char* argv[])
   }
 
   boost::asio::io_context ioc;
-  auto work = boost::asio::make_work_guard(ioc);
-
   auto backend = Backend::make_Backend(ioc, config);
 
+  auto work = boost::asio::make_work_guard(ioc);
   boost::asio::spawn(
-      ioc, [&backend](boost::asio::yield_context yield) {
-            std::cout << "Beginning migration" << std::endl;
+      ioc, [&backend, &work](boost::asio::yield_context yield) {
             doMigration(*backend, yield);
-            std::cout << "Completed migration" << std::endl;
+            backend->sync();
+            work.reset();
         });
 
   ioc.run();
